@@ -45,8 +45,10 @@ all_proc <-
   all_raw |> 
   map(~mutate(.x, across(where(is.labelled), as_factor))) |> 
   map(~mutate(.x, across(any_of(c("ID", "id")), as.character))) |> 
-  map(~rename(.x, cond = any_of(c("Cond", "cond")))) |> 
-  map(~mutate(.x, cond = case_when(cond %in% c("kontroll", "control") ~ "control",
+  map(~rename(.x, cond = any_of(c("Cond", "cond")))) |>
+  map(~rename(.x, SDQ_kapcs = any_of(c("SDQ_kapcs", "SDQkapcs")))) |> 
+  map(~rename(.x, SDQ_szoc = any_of(c("SDQ_szoc", "SDQszoc")))) |> 
+    map(~mutate(.x, cond = case_when(cond %in% c("kontroll", "control") ~ "control",
                                    cond %in% c("mindfulness", "intervention") ~ "mindfulness"
                                    ))) |> 
   map2(.y = names(all_raw), ~mutate(.x, id = paste0(.y, "_", row_number()), .before = 1))
@@ -163,8 +165,30 @@ correlators <- c("EAS_emot", "EAS_acti", "EAS_soc", "EAS_shy",
                  "pre_cort_basal_mean")
 
 all_proc |> 
-  map(all_proc, ~select(.x, any_of(c("id", correlators)))) |> 
-  bind_rows(.id = "study") 
+  map(~select(.x, any_of(c("id", correlators)))) |> 
+  bind_rows(.id = "study") |> 
+  correlation(p_adjust = "none", method = "spearman") |> 
+  arrange(p) |> 
+  gt() |> 
+  cols_hide(c("CI", "Method", "S")) |> 
+  cols_move(n_Obs, CI_high) |> 
+  fmt_number(c("rho", "CI_low",	"CI_high", "S"), decimals = 2) |> 
+  fmt_number("p", decimals = 3) |> 
+  tab_options(column_labels.font.weight = "bold",
+              column_labels.background.color = "lightgrey", 
+              row.striping.background_color = "#EEEEEE", 
+              row.striping.include_table_body = TRUE) |> 
+  gtsave("docs/correlations.docx")
 
+all_proc |> 
+  map(~select(.x, any_of(c("id", correlators)))) |> 
+  bind_rows(.id = "study") |> 
+  correlation(p_adjust = "none", method = "spearman") |> 
+  cor_lower() |> 
+  summary() |> 
+  print_html()
 
-  
+all_proc |> 
+  map(~select(.x, starts_with(c("id", "SDQ"))) |> 
+        glimpse())
+
