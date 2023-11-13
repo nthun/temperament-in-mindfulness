@@ -41,13 +41,16 @@ all_raw <-
   map(list.files("data/", full.names = TRUE), read_spss) |> 
   set_names(1:4)
 
+
+# Data processing ---------------------------------------------------------
 all_proc <-
   all_raw |> 
   map(~mutate(.x, across(where(is.labelled), as_factor))) |> 
   map(~mutate(.x, across(any_of(c("ID", "id")), as.character))) |> 
   map(~rename(.x, cond = any_of(c("Cond", "cond")))) |>
   map(~rename(.x, SDQ_kapcs = any_of(c("SDQ_kapcs", "SDQkapcs")))) |> 
-  map(~rename(.x, SDQ_szoc = any_of(c("SDQ_szoc", "SDQszoc")))) |> 
+  map(~rename(.x, SDQ_szoc = any_of(c("SDQ_szoc", "SDQszoc"))),
+      ~rename(.x, HFflowch = any_of(c("HFflow_ch", "HFflowch")))) |> 
     map(~mutate(.x, cond = case_when(cond %in% c("kontroll", "control") ~ "control",
                                    cond %in% c("mindfulness", "intervention") ~ "mindfulness"
                                    ))) |> 
@@ -58,8 +61,11 @@ map(all_proc, glimpse)
 
 map(all_proc, ~pull(.x, cond))
 
-map(all_proc, ~select(.x, contains("cort")))
+map(all_proc, ~select(.x, contains("shark")))
 
+
+
+# Multilevel models -------------------------------------------------------
 # A modelleket úgy építettem fel, hogy a moderátor az SDQ valamelyik faktora/összpontszám vagy az EAS valamelyik faktora, a függetletlen változó mindig a kondíció, és a függo változó a kortizolban, végrehajtókban bekövetkezett változás. Mindegyik kivont értéknél (change) az a jobb, ha minél kisebb, kivéve a Corsi backward span esetében (CBs_ch). 
 
 outcomes <- c("Cort_ch", "CBs_ch", "HFmix_ch", "HFflowch", "Shark_ch", "TMTe_ch", "Loc_e_ch", "Dir_e_ch", "SSTneuch", "Percomch")
@@ -97,20 +103,6 @@ all_models <-
                            geom_point() +
                            geom_smooth(method = "lm")))
 
-temp <- 
-  all_models |> 
-  slice(31) |> 
-  pull(data)%>%
-  .[[1]]
-
-temp |> 
-  mutate(mod_group = case_when(moderator_value >= 1 ~ "high",
-                               moderator_value <= -1 ~ "low")) |> 
-  ggplot() +
-  aes(x = moderator_value, y = outcome_value, color = cond) +
-  geom_point() +
-  geom_smooth(method = "lm")
-
 
 all_models |> 
   unnest(estimates) |> 
@@ -143,11 +135,6 @@ plots |>
   pull(plot) %>%
   .[[1]]
   
-xy |>   
-  filter(outcome == "TMTe_ch", moderator == "SDQ_tot") |> 
-  pull(data) %>% view()
-
-
 
 # A 4 studyban összesen 243 fo 1 IV, 10 DV, 12 moderator. Ez összesen 89 kombinációt jelent.
 # A modell minden esetben így néz ki: outcome ~ cond * moderator + (1|study)
@@ -159,16 +146,32 @@ xy |>
 # Correlations ------------------------------------------------------------
 # Megnezned lszi a korrelaciokat a moderatorok (1. temperamentum (EAS) skalak, 2. SDQ total es skalak) es a baseline (pre-test) kortizol es kognitiv teljesitmeny (1. CB, 2. HF mix, 3. HF flower, 4. shark) kozott?
 
+# HFflowch - Cort_ch
+# Shark_ch - Cort_ch
+# Shark_ch - HFflowch
+# Cort_ch - EAS_emot
+# HFflowch - EAS_emot
+# Shark_ch - EAS_emot
+# Cort_ch - SDQ_tot
+# HFflowch - SDQ_tot
+# Shark_ch - SDQ_tot
+# Cort_ch - SDQ_vis
+# HFflowch - SDQ_vis
+# Shark_ch - SDQ_vis
+
 correlators <- c("EAS_emot", "EAS_acti", "EAS_soc", "EAS_shy", 
-                 "SDQ", "SDQ_tot", "SDQ_erz", "SDQ_vis", "SDQ_hip", "SDQ_hip", "SDQ_kapcs", "SDQ_szoc", 
-                 "pre_CB_span", "pre_G_comission_error_shark_error",  "pre_HF_flowers_error", "pre_HF_mix_error", 
-                 "pre_cort_basal_mean")
+                 "SDQ", "SDQ_tot", "SDQ_erz", "SDQ_vis", "SDQ_hip", "SDQ_hip", 
+                 "SDQ_kapcs", "SDQ_szoc", "pre_CB_span", 
+                 "pre_G_comission_error_shark_error",  "pre_HF_flowers_error",
+                 "pre_HF_mix_error", "pre_cort_basal_mean",
+                 "Cort_ch", "HFflowch", "Shark_ch")
 
 all_proc |> 
   map(~select(.x, any_of(c("id", correlators)))) |> 
   bind_rows(.id = "study") |> 
   correlation(p_adjust = "none", method = "spearman") |> 
   arrange(p) |> 
+  drop_na(rho) |> 
   gt() |> 
   cols_hide(c("CI", "Method", "S")) |> 
   cols_move(n_Obs, CI_high) |> 
