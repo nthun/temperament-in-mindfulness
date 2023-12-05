@@ -51,9 +51,10 @@ all_proc <-
   map(~rename(.x, SDQ_kapcs = any_of(c("SDQ_kapcs", "SDQkapcs")))) |> 
   map(~rename(.x, SDQ_szoc = any_of(c("SDQ_szoc", "SDQszoc"))),
       ~rename(.x, HFflowch = any_of(c("HFflow_ch", "HFflowch")))) |> 
-    map(~mutate(.x, cond = case_when(cond %in% c("kontroll", "control") ~ "control",
-                                   cond %in% c("mindfulness", "intervention") ~ "mindfulness"
-                                   ))) |> 
+  map(~mutate(.x, cond = case_when(cond %in% c("kontroll", "control") ~ "control",
+                                 cond %in% c("mindfulness", "intervention") ~ "mindfulness"))) |> 
+  map(~rename(.x, cort_pre = any_of(c("pre_cort_basal_mean", "pre_cortisol_mean")))) |> 
+  map(~rename(.x, cort_post = any_of(c("int_cort_basal_mean", "post_cortisol_mean")))) |> 
   map2(.y = names(all_raw), ~mutate(.x, id = paste0(.y, "_", row_number()), .before = 1))
   
 
@@ -189,9 +190,35 @@ all_proc |>
   correlation(p_adjust = "none", method = "spearman") |> 
   cor_lower() |> 
   summary() |> 
-  print_html()
+  gt() |> 
+  fmt_number(-Parameter) |> 
+  sub_missing(missing_text = " ")
+  
 
-all_proc |> 
-  map(~select(.x, starts_with(c("id", "SDQ"))) |> 
-        glimpse())
+# Cortisol test-retest ---------------------------------------------------------
+
+# Ugy emlekszem, hogy felmerult az a kerdes, hogy olyan furak az eredmenyek a kortizolt illetoen es anno voltak fenntartasaink, mert pl nagyon mas ertekeket kaptunk amikor egy kovetkezo evben megismeteltunk egy kiserletet, hogy azt szeretnenk megkerni, hogy nezd meg lszi, hogy vannak-e kulonbsegek a cortisol alap ertekekeben (nem a valtozas, hanem pre-teszt es poszt-teszt) a ket kiserlet kozott, amik itt bekerultek az elemzesbe.
+
+cort_prepost <- 
+  all_proc |> 
+  map(~select(.x, contains(c("ID","cort"), ignore.case = FALSE))) |> 
+  bind_rows(.id = "study") |> view()
+  drop_na()
+
+cort_prepost |>   
+  pivot_wider(names_from = "study", values_from = c("cort_pre", "cort_post"))
+  
+  
+
+cort_prepost |>
+  select( c("cort_pre", "cort_post")) |> 
+  correlation()
+
+cort_prepost |> 
+  ggplot() +
+  aes(x = cort_pre, fill = study) +
+  geom_density(alpha = .5) +
+  geom_boxplot()
+
+
 
