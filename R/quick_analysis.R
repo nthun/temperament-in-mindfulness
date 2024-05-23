@@ -38,7 +38,7 @@ library(correlation)
 theme_set(theme_light())
 
 all_raw <- 
-  map(list.files("data/", full.names = TRUE), read_spss) |> 
+  map(list.files(path = "data/", pattern = ".*.sav",full.names = TRUE), read_spss) |> 
   set_names(1:4)
 
 
@@ -56,12 +56,17 @@ all_proc <-
                                    ))) |> 
   map2(.y = names(all_raw), ~mutate(.x, id = paste0(.y, "_", row_number()), .before = 1))
   
+# This is a super ugly solution to transform cortisol values in study 3 from µg/dL to ng/mL
+all_proc$`3` <- 
+  all_proc$`3` |> 
+  mutate(across(contains("cort"), ~`*`(., 10)))
+
 
 map(all_proc, glimpse)
 
 map(all_proc, ~pull(.x, cond))
 
-map(all_proc, ~select(.x, contains("shark")))
+map(all_proc, ~select(.x, contains("cort")))
 
 
 
@@ -83,8 +88,10 @@ all_models <-
   # Standardize all numeric variables
   mutate(across(where(is.numeric), ~scale(.) |> as.numeric())) |> 
   # Create separate datasets for each model
-  pivot_longer(any_of(outcomes), names_to = "outcome", values_to = "outcome_value", values_drop_na = TRUE) |> 
-  pivot_longer(any_of(moderators), names_to = "moderator", values_to = "moderator_value", values_drop_na = TRUE) |> 
+  pivot_longer(any_of(outcomes), 
+               names_to = "outcome", values_to = "outcome_value", values_drop_na = TRUE) |> 
+  pivot_longer(any_of(moderators), 
+               names_to = "moderator", values_to = "moderator_value", values_drop_na = TRUE) |> 
   group_by(outcome, moderator) |> 
   mutate(study_n = n_distinct(study)) |> 
   group_by(outcome, moderator, study_n) |> 
@@ -98,17 +105,23 @@ all_models <-
                    map(data, ~lm(outcome_value ~ cond * moderator_value, data = .x))),
          estimates = map(model, tidy, conf.int = TRUE),
          performance = map(model, glance),
-         plot = map(data, ~ggplot() +
+         plot = pmap(list(data, outcome, moderator), 
+                          ~..1 |> 
+                           ggplot() +
                            aes(x = moderator_value, y = outcome_value, color = cond) +
                            geom_point() +
-                           geom_smooth(method = "lm")))
+                           geom_smooth(method = "lm") +
+                           labs(y = first(..2), x = first(..3),
+                           color = "Condition")
+         ))
 
 
 all_models |> 
   unnest(estimates) |> 
   filter(effect == "fixed") |> 
   select(outcome, moderator, study_n, term, estimate, conf.low, conf.high, std.error:p.value) |> 
-  # group_by(outcome, moderator) |> 
+  # arrange(p.value) |> 
+  group_by(outcome, moderator) |>
   gt() |> 
   fmt_number(c("estimate", "std.error", "conf.low", "conf.high", "statistic", "df"), decimals = 2) |> 
   fmt_number(c("p.value"), decimals = 3) |> 
@@ -118,23 +131,23 @@ all_models |>
               row_group.font.weight = "bold", 
               row.striping.include_table_body = TRUE,
               row.striping.background_color = "#EEEEEE"
-  )# |> 
-  gtsave("docs/models.docx")
+  ) # |> 
+  # gtsave("docs/models.docx")
   
 plots <- 
   all_models |> 
   filter((outcome == "Cort_ch" & moderator %in% c("EAS_emot", "SDQ_tot")) | 
           (outcome == "HFmix_ch" & moderator == "EAS_emot") |
            (outcome == "Shark_ch" & moderator == "SDQ_vis"))
-  
+
+
 plt <- pull(plots, plot)
 
-
 plots |> 
-  slice(2) |> 
-  pull(plot) %>%
-  .[[1]]
-  
+  unnest(performance)
+  pull(plot)
+
+# plots$plot[[4]]
 
 # A 4 studyban összesen 243 fo 1 IV, 10 DV, 12 moderator. Ez összesen 89 kombinációt jelent.
 # A modell minden esetben így néz ki: outcome ~ cond * moderator + (1|study)
@@ -181,17 +194,20 @@ all_proc |>
               column_labels.background.color = "lightgrey", 
               row.striping.background_color = "#EEEEEE", 
               row.striping.include_table_body = TRUE) |> 
-  gtsave("docs/correlations.docx")
+  gtsave("docs/correlations.docx") |>
+  force()
 
 all_proc |> 
   map(~select(.x, any_of(c("id", correlators)))) |> 
   bind_rows(.id = "study") |> 
-  correlation(p_adjust = "none", method = "spearman") |> 
-  cor_lower() |> 
+  correlation(p_adjust = "none", method = "spearman", redundant = FALSE) |> 
   summary() |> 
-  print_html()
+  gt() |> 
+  fmt_number(-Parameter, decimals = 2) |> 
+  sub_missing(missing_text = "") |> 
+  gtsave("docs/cor_matrix.docx")
 
-all_proc |> 
-  map(~select(.x, starts_with(c("id", "SDQ"))) |> 
-        glimpse())
 
+  
+
+# SANDBOX -------------------------------------------------------------------------------------
